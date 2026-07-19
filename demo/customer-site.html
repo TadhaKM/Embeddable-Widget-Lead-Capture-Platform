@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Acme Co — a customer's website (embed demo)</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 0;
+        color: #1a1a1a;
+        background: #fafafa;
+      }
+      header,
+      main,
+      footer {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      header {
+        border-bottom: 1px solid #eee;
+        background: #fff;
+      }
+      .badge {
+        display: inline-block;
+        font-size: 12px;
+        background: #111;
+        color: #fff;
+        padding: 2px 8px;
+        border-radius: 999px;
+      }
+      .note {
+        font-size: 13px;
+        color: #666;
+        background: #fff;
+        border: 1px dashed #ccc;
+        border-radius: 8px;
+        padding: 12px 16px;
+      }
+      code {
+        background: #f0f0f0;
+        padding: 1px 4px;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="badge">3rd-party site</span>
+      <h1>Acme Co</h1>
+      <p>Rockets, anvils, and questionable roadrunner traps since 1949.</p>
+    </header>
+
+    <main>
+      <p class="note">
+        This page is deliberately served from a <strong>different origin</strong>
+        than the platform (e.g. <code>http://localhost:8080</code> while the app
+        runs on <code>http://localhost:3000</code>). The widget below is pulled
+        in cross-origin by the single embed line — no other integration.
+      </p>
+
+      <h2>Stay in the loop</h2>
+      <p>Drop your email and we'll send you the good stuff.</p>
+
+      <!-- ⬇⬇⬇ The entire integration: one line. ⬇⬇⬇ -->
+      <script
+        src="http://localhost:3000/widget.js"
+        data-widget-id="00000000-0000-0000-0000-0000000000a1"
+        async
+      ></script>
+      <!-- ⬆⬆⬆ The widget renders right here. ⬆⬆⬆ -->
+    </main>
+
+    <footer>
+      <small>© Acme Co. This is a demo host page, not a real company.</small>
+    </footer>
+  </body>
+</html>
