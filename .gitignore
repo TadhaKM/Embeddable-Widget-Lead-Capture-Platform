@@ -21,3 +21,6 @@ next-env.d.ts
 *.pem
 *.tsbuildinfo
 npm-debug.log*
+
+# verification runtime artifacts
+webhook-received.log

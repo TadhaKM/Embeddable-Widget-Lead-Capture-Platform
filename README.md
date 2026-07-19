@@ -218,6 +218,44 @@ curl -i -X POST http://localhost:3000/api/submissions \
 
 ---
 
+## Verified live (2026-07-19)
+
+Everything below was exercised against a **real Supabase project** and a **real
+cross-origin request path** — not build/typecheck or mocked tests. Concrete
+evidence from that pass:
+
+- **Config endpoint (live DB read):** `GET …/config` with
+  `Origin: http://localhost:5500` → `200`, `ETag: W/"…2026-07-19T13:10:51…"`
+  (matches the widget's `updated_at`),
+  `Cache-Control: public, max-age=60, stale-while-revalidate=300`,
+  `Access-Control-Allow-Origin: *`. Body was exactly `{type, copy, fields,
+  targeting}` — `webhook_url` / `allowed_origins` / `org_id` did **not** leak.
+- **Real submission (full E2E):** cross-origin `POST` from the allowed origin →
+  `201`, `Access-Control-Allow-Origin: http://localhost:5500`. The Postgres row
+  had `geo_json = {San Francisco, CA, US}`, `geo_provider_used = provider1`,
+  `is_spam = false`, and `ip_hash` a salted hash (raw IP never stored). The mock
+  webhook receiver logged the matching `submission_id`; `rate_limit_hits` gained a row.
+- **Origin allowlist:** `Origin: https://evil.example` against a widget restricted
+  to `http://localhost:5500` → `403`.
+- **Rate limit:** 13-request burst from one IP → requests 1–10 `201`, then
+  `429` with `Retry-After: 60`.
+- **Validation:** oversized (~20 KB) → `413`; garbage JSON → `400`; bad email → `400`.
+- **Honeypot:** filled honeypot → silent `200`; DB row `is_spam = true`,
+  `geo_json = null`, `geo_provider_used = none`; **no** webhook line emitted for it.
+- **Geo fallback:** restarted with `GEO_PROVIDER_1_DOWN=true` → submission still
+  `201`, stored `geo_provider_used = provider2` with New York geo data.
+- **Safe webhook failure:** dead target → `201` in **0.33 s**, `side_effect_failures`
+  row `"fetch failed"`. Hanging target → `201` capped at **3.30 s** (the 3s
+  AbortController fired), `side_effect_failures` row `"This operation was aborted"`.
+- **RLS enforced by the DB:** anon key with no session reading `widgets` /
+  `submissions` / `side_effect_failures` → **0 rows** each; service role (bypasses
+  RLS) → 1 widget, 16 submissions.
+
+Reproduce with `scripts/mock-webhook-receiver.js` (+ `scripts/hang-server.js`) and
+`scripts/db-check.js` against a connected project.
+
+---
+
 ## Not built / upgrade paths
 
 Explicitly **out of scope** for this build (stretch goals, not implemented):
@@ -232,10 +270,13 @@ Explicitly **out of scope** for this build (stretch goals, not implemented):
 
 ## Notes
 
-- **Auth is real Supabase-only.** Authed endpoints (widget CRUD, dashboard) are
-  built and unit-tested via the mocked data layer, but exercising them *for real*
-  needs a Supabase project + a signed-in user linked in `org_members`.
+- **What's still *not* live-driven:** the authed admin/dashboard endpoints
+  (`POST/PATCH /api/widgets`, the dashboard fetches) need a real signed-in Supabase
+  user with a Bearer token linked in `org_members`; that specific path wasn't
+  exercised in the live pass (the widget was configured via the service role
+  instead). RLS enforcement itself *was* verified live — see above.
 - **IP privacy:** raw IPs are never stored — only a salted `sha256` (`IP_HASH_SALT`).
+  Confirmed live: stored submissions carry an `ip_hash`, never an address.
 - **npm audit:** remaining advisories only resolve by force-upgrading to Next 15,
   which breaks the spec's Next 14 pin; Next is pinned at the latest 14.2.x patch.
 ```
