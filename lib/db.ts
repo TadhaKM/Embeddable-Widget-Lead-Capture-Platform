@@ -1,5 +1,5 @@
 import { serviceClient } from '@/lib/supabase/server';
-import type { Widget } from '@/lib/types';
+import type { PublicWidgetConfig, Widget } from '@/lib/types';
 import type { CreateWidgetInput, UpdateWidgetInput } from '@/lib/schemas';
 
 /**
@@ -100,4 +100,35 @@ export async function deleteWidget(
     .maybeSingle();
   if (error) throw new Error(error.message);
   return data != null;
+}
+
+// ---------------------------------------------------------------------------
+// Public config (Phase 3) — NOT org-scoped (public), and selects ONLY the
+// non-sensitive columns. webhook_url / allowed_origins / org_id never leave here.
+// ---------------------------------------------------------------------------
+export interface PublicConfigRow {
+  config: PublicWidgetConfig;
+  updated_at: string;
+}
+
+export async function getPublicConfig(
+  id: string,
+): Promise<PublicConfigRow | null> {
+  const sb = serviceClient();
+  const { data, error } = await sb
+    .from('widgets')
+    .select('type, copy_json, fields_json, targeting_json, updated_at')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  return {
+    config: {
+      type: data.type,
+      copy: (data.copy_json ?? {}) as Record<string, unknown>,
+      fields: (data.fields_json ?? []) as PublicWidgetConfig['fields'],
+      targeting: (data.targeting_json ?? {}) as Record<string, unknown>,
+    },
+    updated_at: data.updated_at as string,
+  };
 }
