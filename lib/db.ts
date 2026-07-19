@@ -1,5 +1,12 @@
 import { serviceClient } from '@/lib/supabase/server';
-import type { PublicWidgetConfig, Widget } from '@/lib/types';
+import type {
+  GeoResult,
+  PublicWidgetConfig,
+  Widget,
+  WidgetField,
+  WidgetStatus,
+  WidgetType,
+} from '@/lib/types';
 import type { CreateWidgetInput, UpdateWidgetInput } from '@/lib/schemas';
 
 /**
@@ -131,4 +138,94 @@ export async function getPublicConfig(
     },
     updated_at: data.updated_at as string,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Public submission path (Phase 4) — service-role writes, bypassing RLS.
+// ---------------------------------------------------------------------------
+
+/** Just the columns the submission handler needs — incl. status/allowlist/webhook. */
+export interface SubmissionWidget {
+  id: string;
+  org_id: string;
+  type: WidgetType;
+  fields_json: WidgetField[];
+  allowed_origins: string[] | null;
+  webhook_url: string | null;
+  status: WidgetStatus;
+}
+
+export async function getWidgetForSubmission(
+  id: string,
+): Promise<SubmissionWidget | null> {
+  const sb = serviceClient();
+  const { data, error } = await sb
+    .from('widgets')
+    .select('id, org_id, type, fields_json, allowed_origins, webhook_url, status')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as SubmissionWidget | null) ?? null;
+}
+
+export async function countRecentHits(
+  widgetId: string,
+  ipHash: string,
+  sinceIso: string,
+): Promise<number> {
+  const sb = serviceClient();
+  const { count, error } = await sb
+    .from('rate_limit_hits')
+    .select('id', { count: 'exact', head: true })
+    .eq('widget_id', widgetId)
+    .eq('ip_hash', ipHash)
+    .gte('created_at', sinceIso);
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
+export async function insertHit(
+  widgetId: string,
+  ipHash: string,
+): Promise<void> {
+  const sb = serviceClient();
+  const { error } = await sb
+    .from('rate_limit_hits')
+    .insert({ widget_id: widgetId, ip_hash: ipHash });
+  if (error) throw new Error(error.message);
+}
+
+export interface InsertSubmissionInput {
+  widget_id: string;
+  org_id: string;
+  fields_json: Record<string, unknown>;
+  ip_hash: string;
+  geo_json: GeoResult | null;
+  geo_provider_used: string;
+  is_spam: boolean;
+}
+
+export async function insertSubmission(
+  input: InsertSubmissionInput,
+): Promise<string> {
+  const sb = serviceClient();
+  const { data, error } = await sb
+    .from('submissions')
+    .insert(input)
+    .select('id')
+    .single();
+  if (error) throw new Error(error.message);
+  return data.id as string;
+}
+
+export async function logSideEffectFailure(
+  submissionId: string,
+  type: string,
+  message: string,
+): Promise<void> {
+  const sb = serviceClient();
+  const { error } = await sb
+    .from('side_effect_failures')
+    .insert({ submission_id: submissionId, type, error_message: message });
+  if (error) throw new Error(error.message);
 }
