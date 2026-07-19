@@ -2,6 +2,7 @@ import { serviceClient } from '@/lib/supabase/server';
 import type {
   GeoResult,
   PublicWidgetConfig,
+  Submission,
   Widget,
   WidgetField,
   WidgetStatus,
@@ -228,4 +229,102 @@ export async function logSideEffectFailure(
     .from('side_effect_failures')
     .insert({ submission_id: submissionId, type, error_message: message });
   if (error) throw new Error(error.message);
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard (Phase 5) — authed, org-scoped reads.
+// ---------------------------------------------------------------------------
+export interface ListSubmissionsOpts {
+  page: number;
+  pageSize: number;
+  includeSpam: boolean;
+}
+
+export interface ListSubmissionsResult {
+  submissions: Submission[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function listSubmissions(
+  orgId: string,
+  widgetId: string,
+  opts: ListSubmissionsOpts,
+): Promise<ListSubmissionsResult> {
+  const sb = serviceClient();
+  const from = (opts.page - 1) * opts.pageSize;
+  const to = from + opts.pageSize - 1;
+
+  let q = sb
+    .from('submissions')
+    .select('*', { count: 'exact' })
+    .eq('org_id', orgId)
+    .eq('widget_id', widgetId);
+  if (!opts.includeSpam) q = q.eq('is_spam', false);
+
+  const { data, count, error } = await q
+    .order('created_at', { ascending: false })
+    .range(from, to);
+  if (error) throw new Error(error.message);
+
+  return {
+    submissions: (data ?? []) as Submission[],
+    total: count ?? 0,
+    page: opts.page,
+    pageSize: opts.pageSize,
+  };
+}
+
+export interface WidgetStats {
+  total: number; // non-spam (real leads)
+  spam_dropped: number; // honeypot-caught
+  last_24h: number; // non-spam in trailing 24h
+  geo: Record<string, number>; // country -> count (non-spam)
+}
+
+export async function getStats(
+  orgId: string,
+  widgetId: string,
+): Promise<WidgetStats> {
+  const sb = serviceClient();
+
+  const countWith = async (
+    apply: (q: any) => any, // eslint-disable-line @typescript-eslint/no-explicit-any
+  ): Promise<number> => {
+    let q: any = sb // eslint-disable-line @typescript-eslint/no-explicit-any
+      .from('submissions')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', orgId)
+      .eq('widget_id', widgetId);
+    q = apply(q);
+    const { count, error } = await q;
+    if (error) throw new Error(error.message);
+    return count ?? 0;
+  };
+
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const [total, spam_dropped, last_24h] = await Promise.all([
+    countWith((q) => q.eq('is_spam', false)),
+    countWith((q) => q.eq('is_spam', true)),
+    countWith((q) => q.eq('is_spam', false).gte('created_at', since24h)),
+  ]);
+
+  // Geo breakdown among non-spam submissions.
+  const { data: geoRows, error } = await sb
+    .from('submissions')
+    .select('geo_json')
+    .eq('org_id', orgId)
+    .eq('widget_id', widgetId)
+    .eq('is_spam', false);
+  if (error) throw new Error(error.message);
+
+  const geo: Record<string, number> = {};
+  for (const row of geoRows ?? []) {
+    const g = row.geo_json as GeoResult | null;
+    const country = g?.country ?? 'unknown';
+    geo[country] = (geo[country] ?? 0) + 1;
+  }
+
+  return { total, spam_dropped, last_24h, geo };
 }
